@@ -106,7 +106,7 @@ class SentenceTransformer(nn.Sequential):
         super().__init__(modules)
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info("Use pytorch device: {}".format(device))
+            # logger.info("Use pytorch device: {}".format(device))
 
         self._target_device = torch.device(device)
 

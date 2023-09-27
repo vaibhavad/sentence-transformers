@@ -162,60 +162,60 @@ class SentenceTransformer(nn.Sequential):
         sentences_sorted = [sentences[idx] for idx in length_sorted_idx]
         all_embeddings = []
 
-        # For distributed training
-        if torch.distributed.is_initialized():
-            world_size = torch.distributed.get_world_size()
-            rank = torch.distributed.get_rank()
+        # # For distributed training
+        # if torch.distributed.is_initialized():
+        #     world_size = torch.distributed.get_world_size()
+        #     rank = torch.distributed.get_rank()
+        #     if device is None:
+        #         device = self._target_device
+        #     # defining the 0-dim sizes of the batches
+        #     sizes = [len(sentences_sorted) // world_size + (1 if rank < len(sentences_sorted) % world_size else 0)
+        #              for rank in range(world_size)]
+        #     # dividing the list of sentences into batches
+        #     limits = np.cumsum([0] + sizes)
+        #     local_sentences = sentences_sorted[limits[rank]:limits[rank+1]]
+        #     # embedding
+        #     local_embeddings = []
+        #     for start_index in trange(0, len(local_sentences), batch_size, desc="Batches", disable=not show_progress_bar):
+        #         sentences_batch = local_sentences[start_index:start_index + batch_size]
+        #         batch_embeddings = self._encode(sentences_batch, device=device, output_value=output_value,
+        #                                   convert_to_numpy=False, normalize_embeddings=normalize_embeddings,
+        #                                   multiprocessing=False)
+        #         local_embeddings.extend(batch_embeddings)
+        #     local_embeddings = torch.stack(local_embeddings)
+        #     # gathering everything thanks to the size information from earlier
+        #     all_embeddings = mismatched_sizes_all_gather(local_embeddings)
+        #     all_embeddings = torch.cat(all_embeddings)
+        #     if convert_to_numpy:
+        #         all_embeddings = all_embeddings.cpu()
+
+        # # Otherwise
+        # else:
+        # Single-GPU/single-process
+        if num_proc is None or num_proc == 1:
             if device is None:
                 device = self._target_device
-            # defining the 0-dim sizes of the batches
-            sizes = [len(sentences_sorted) // world_size + (1 if rank < len(sentences_sorted) % world_size else 0)
-                     for rank in range(world_size)]
-            # dividing the list of sentences into batches
-            limits = np.cumsum([0] + sizes)
-            local_sentences = sentences_sorted[limits[rank]:limits[rank+1]]
-            # embedding
-            local_embeddings = []
-            for start_index in trange(0, len(local_sentences), batch_size, desc="Batches", disable=not show_progress_bar):
-                sentences_batch = local_sentences[start_index:start_index + batch_size]
-                batch_embeddings = self._encode(sentences_batch, device=device, output_value=output_value,
-                                          convert_to_numpy=False, normalize_embeddings=normalize_embeddings,
-                                          multiprocessing=False)
-                local_embeddings.extend(batch_embeddings)
-            local_embeddings = torch.stack(local_embeddings)
-            # gathering everything thanks to the size information from earlier
-            all_embeddings = mismatched_sizes_all_gather(local_embeddings)
-            all_embeddings = torch.cat(all_embeddings)
-            if convert_to_numpy:
-                all_embeddings = all_embeddings.cpu()
-
-        # Otherwise
+            self.to(device)
+            for start_index in trange(0, len(sentences), batch_size, desc="Batches", disable=not show_progress_bar):
+                sentences_batch = sentences_sorted[start_index:start_index + batch_size]
+                embeddings = self._encode(sentences_batch, device=device, output_value=output_value,
+                                            convert_to_numpy=convert_to_numpy, normalize_embeddings=normalize_embeddings,
+                                            multiprocessing=False)
+                all_embeddings.extend(embeddings)
+        # Multi-GPU/multi-process
         else:
-            # Single-GPU/single-process
-            if num_proc is None or num_proc == 1:
-                if device is None:
-                    device = self._target_device
-                self.to(device)
-                for start_index in trange(0, len(sentences), batch_size, desc="Batches", disable=not show_progress_bar):
-                    sentences_batch = sentences_sorted[start_index:start_index + batch_size]
-                    embeddings = self._encode(sentences_batch, device=device, output_value=output_value,
-                                              convert_to_numpy=convert_to_numpy, normalize_embeddings=normalize_embeddings,
-                                              multiprocessing=False)
-                    all_embeddings.extend(embeddings)
-            # Multi-GPU/multi-process
-            else:
-                # Allows for several CUDA processes
-                cuda_compatible_multiprocess = mp.get_context("spawn")
-                with cuda_compatible_multiprocess.Pool(num_proc) as p:
-                    sentences_batches = [sentences_sorted[start_index:start_index + batch_size]
-                                         for start_index in trange(0, len(sentences), batch_size)]
-                    for result in p.map(partial(self._encode,
-                                                device=device,
-                                                output_value=output_value,
-                                                convert_to_numpy=convert_to_numpy,
-                                                normalize_embeddings=normalize_embeddings),
-                                        sentences_batches):
-                        all_embeddings.extend(result)
+            # Allows for several CUDA processes
+            cuda_compatible_multiprocess = mp.get_context("spawn")
+            with cuda_compatible_multiprocess.Pool(num_proc) as p:
+                sentences_batches = [sentences_sorted[start_index:start_index + batch_size]
+                                        for start_index in trange(0, len(sentences), batch_size)]
+                for result in p.map(partial(self._encode,
+                                            device=device,
+                                            output_value=output_value,
+                                            convert_to_numpy=convert_to_numpy,
+                                            normalize_embeddings=normalize_embeddings),
+                                    sentences_batches):
+                    all_embeddings.extend(result)
 
         all_embeddings = [all_embeddings[idx] for idx in np.argsort(length_sorted_idx)]
 
@@ -630,7 +630,7 @@ class SentenceTransformer(nn.Sequential):
         a list of ints (which means a single tokenized text), or a tuple of list of ints
         (representing several text inputs to the model).
         """
-        if isinstance(text, str) or isinstance(text[0], int) or len(text) == 0:     #Single text, list of ints, or empty
+        if isinstance(text, str) or (isinstance(text, list) and isinstance(text[0], int)) or len(text) == 0:     #Single text, list of ints, or empty
             return len(text)
         if isinstance(text, dict):                                                  #{key: value} case
             return len(next(iter(text.values())))
@@ -856,20 +856,21 @@ class SentenceTransformer(nn.Sequential):
 
     def _eval_during_training(self, evaluator, output_path, save_best_model, epoch, steps, callback, main_process=True):
         """Runs evaluation during the training"""
-        eval_path = output_path
-        if output_path is not None:
-            os.makedirs(output_path, exist_ok=True)
-            eval_path = os.path.join(output_path, "eval")
-            os.makedirs(eval_path, exist_ok=True)
+        if main_process:
+            eval_path = output_path
+            if output_path is not None:
+                os.makedirs(output_path, exist_ok=True)
+                eval_path = os.path.join(output_path, "eval")
+                os.makedirs(eval_path, exist_ok=True)
 
-        if evaluator is not None:
-            score = evaluator(self, output_path=eval_path, epoch=epoch, steps=steps)
-            if callback is not None and main_process:
-                callback(score, epoch, steps)
-            if score > self.best_score and main_process:
-                self.best_score = score
-                if save_best_model:
-                    self.save(output_path)
+            if evaluator is not None:
+                score = evaluator(self, output_path=eval_path, epoch=epoch, steps=steps, device=self._target_device)
+                if callback is not None:
+                    callback(score, epoch, steps)
+                if score > self.best_score:
+                    self.best_score = score
+                    if save_best_model:
+                        self.save(output_path)
 
     def _save_checkpoint(self, checkpoint_path, checkpoint_save_total_limit, step):
         # Store new checkpoint

@@ -3,6 +3,7 @@ from .SimilarityFunction import SimilarityFunction
 from .BinaryClassificationEvaluator import BinaryClassificationEvaluator
 from .EmbeddingSimilarityEvaluator import EmbeddingSimilarityEvaluator
 from .InformationRetrievalEvaluator import InformationRetrievalEvaluator
+from .InformationRetrievalEvaluatorAsym import InformationRetrievalEvaluatorAsym
 from .LabelAccuracyEvaluator import LabelAccuracyEvaluator
 from .MSEEvaluator import MSEEvaluator
 from .MSEEvaluatorFromDataFrame import MSEEvaluatorFromDataFrame

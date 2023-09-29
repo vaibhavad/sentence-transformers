@@ -138,15 +138,16 @@ class InformationRetrievalEvaluatorAsym(SentenceEvaluator):
             fOut.close()
 
         if self.main_score_function is None:
-            return max([scores[name]['map@k'][max(self.map_at_k)] for name in self.score_function_names])
+            return max([scores[name]['avg_rank'] for name in self.score_function_names])
         else:
-            return scores[self.main_score_function]['map@k'][max(self.map_at_k)]
+            return scores[self.main_score_function]['avg_rank']
 
     def compute_metrices(self, model, corpus_model = None, corpus_embeddings: Tensor = None, device: str = None) -> Dict[str, float]:
         if corpus_model is None:
             corpus_model = model
 
-        max_k = max(max(self.mrr_at_k), max(self.ndcg_at_k), max(self.accuracy_at_k), max(self.precision_recall_at_k), max(self.map_at_k))
+        # max_k = max(max(self.mrr_at_k), max(self.ndcg_at_k), max(self.accuracy_at_k), max(self.precision_recall_at_k), max(self.map_at_k))
+        max_k = len(self.corpus)
 
         # Compute embedding for the queries
         queries = [{self.query_model_key: query} for query in self.queries]
@@ -212,6 +213,7 @@ class InformationRetrievalEvaluatorAsym(SentenceEvaluator):
         MRR = {k: 0 for k in self.mrr_at_k}
         ndcg = {k: [] for k in self.ndcg_at_k}
         AveP_at_k = {k: [] for k in self.map_at_k}
+        avg_rank = []
 
         # Compute scores on results
         for query_itr in range(len(queries_result_list)):
@@ -265,6 +267,12 @@ class InformationRetrievalEvaluatorAsym(SentenceEvaluator):
 
                 avg_precision = sum_precisions / min(k_val, len(query_relevant_docs))
                 AveP_at_k[k_val].append(avg_precision)
+            
+            # Average rank
+            for rank, hit in enumerate(top_hits):
+                if hit['corpus_id'] in query_relevant_docs:
+                    avg_rank.append(-1 * (rank+1))
+                    break
 
         # Compute averages
         for k in num_hits_at_k:
@@ -284,9 +292,10 @@ class InformationRetrievalEvaluatorAsym(SentenceEvaluator):
 
         for k in AveP_at_k:
             AveP_at_k[k] = np.mean(AveP_at_k[k])
+        
+        avg_rank = np.mean(avg_rank)
 
-
-        return {'accuracy@k': num_hits_at_k, 'precision@k': precisions_at_k, 'recall@k': recall_at_k, 'ndcg@k': ndcg, 'mrr@k': MRR, 'map@k': AveP_at_k}
+        return {'accuracy@k': num_hits_at_k, 'precision@k': precisions_at_k, 'recall@k': recall_at_k, 'ndcg@k': ndcg, 'mrr@k': MRR, 'map@k': AveP_at_k, 'avg_rank': avg_rank}
 
 
     def output_scores(self, scores):
@@ -307,6 +316,8 @@ class InformationRetrievalEvaluatorAsym(SentenceEvaluator):
 
         for k in scores['map@k']:
             logger.info("MAP@{}: {:.4f}".format(k, scores['map@k'][k]))
+        
+        logger.info("Average rank: {:.4f}".format(scores['avg_rank']))
 
 
     @staticmethod

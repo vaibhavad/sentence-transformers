@@ -794,9 +794,9 @@ class SentenceTransformer(nn.Sequential):
                         scale_before_step = scaler.get_scale()
                         accelerator.backward(scaler.scale(loss_value))
                         training_steps += 1
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(loss_model.parameters(), max_grad_norm)
                         if training_steps % gradient_accumulation == 0:
+                            scaler.unscale_(optimizer)
+                            torch.nn.utils.clip_grad_norm_(loss_model.parameters(), max_grad_norm)
                             scaler.step(optimizer)
                             scaler.update()
                             skip_scheduler = scaler.get_scale() != scale_before_step

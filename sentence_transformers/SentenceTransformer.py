@@ -660,7 +660,8 @@ class SentenceTransformer(nn.Sequential):
             checkpoint_path: str = None,
             checkpoint_save_steps: int = 500,
             checkpoint_save_total_limit: int = 0,
-            accelerator: Accelerator = None
+            accelerator: Accelerator = None,
+            stop_after_n_steps: int = None,
             ):
         """
         Train the model with the given training objective
@@ -830,6 +831,9 @@ class SentenceTransformer(nn.Sequential):
                 if checkpoint_path is not None and checkpoint_save_steps is not None and checkpoint_save_steps > 0 \
                         and global_step % checkpoint_save_steps == 0 and accelerator.is_main_process:
                     self._save_checkpoint(checkpoint_path, checkpoint_save_total_limit, global_step)
+                
+                if stop_after_n_steps is not None and global_step >= stop_after_n_steps:
+                    return
 
 
             self._eval_during_training(evaluator, output_path, save_best_model, epoch, -1, callback,

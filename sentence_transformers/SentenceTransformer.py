@@ -769,7 +769,8 @@ class SentenceTransformer(nn.Sequential):
                 loss_model.zero_grad()
                 loss_model.train()
 
-            for _ in trange(steps_per_epoch * gradient_accumulation, desc="Iteration", smoothing=0.05, disable=not show_progress_bar):
+            t = trange(steps_per_epoch * gradient_accumulation, desc="Iteration", smoothing=0.05, disable=not show_progress_bar)
+            for _ in t:
                 for train_idx in range(num_train_objectives):
                     loss_model = loss_models[train_idx]
                     optimizer = optimizers[train_idx]
@@ -791,6 +792,7 @@ class SentenceTransformer(nn.Sequential):
                         with autocast():
                             loss_value = loss_model(features, labels)
 
+                        t.set_postfix({'loss': '{:.5f}'.format(loss_value.item())})
                         scale_before_step = scaler.get_scale()
                         accelerator.backward(scaler.scale(loss_value))
                         training_steps += 1
@@ -806,6 +808,7 @@ class SentenceTransformer(nn.Sequential):
                             global_step += 1
                     else:
                         loss_value = loss_model(features, labels)
+                        t.set_postfix({'loss': '{:.5f}'.format(loss_value.item())})
                         accelerator.backward(loss_value)
                         torch.nn.utils.clip_grad_norm_(loss_model.parameters(), max_grad_norm)
                         if training_steps % gradient_accumulation == 0:
